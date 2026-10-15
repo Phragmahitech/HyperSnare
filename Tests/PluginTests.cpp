@@ -5,6 +5,14 @@
 
 #include <cstdio>
 
+#define PRESET_EXT ".hspreset"
+#define PLUGIN_NAME "HyperSnare"
+#define EDITOR_CLASS HyperSnareAudioProcessorEditor
+#define P_A_ID HyperSnareAudioProcessor::tuneId
+#define P_A_VALUE 260.0f
+#define P_A_OTHER 150.0f
+#define P_LEVEL_ID HyperSnareAudioProcessor::levelId
+
 static int failures = 0, checks = 0;
 
 #define CHECK(cond, ...) do { ++checks; if (! (cond)) { ++failures; std::printf ("  ECHEC (%s:%d) ", __FILE__, __LINE__); std::printf (__VA_ARGS__); std::printf ("\n"); } } while (0)
@@ -217,6 +225,206 @@ int main()
         juce::MemoryBlock truncated (state.getData(), state.getSize() / 2);
         b.setStateInformation (truncated.getData(), (int) truncated.getSize());
         CHECK (std::abs (b.apvts.getRawParameterValue (P::levelId)->load() + 7.5f) < 1e-4f, "un état abîmé a changé les réglages");
+    }
+
+    std::printf ("Presets utilisateur\n");
+    {
+        using Proc = HyperSnareAudioProcessor;
+        const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("PresetTests-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+        dir.deleteRecursively();
+        const auto ext = juce::String (PRESET_EXT);
+
+        Proc p;
+        p.presets.setFolderOverride (dir);
+        const int factoryCount = (int) Proc::getPresets().size();
+
+        // Nouvelle instance : point de départ par défaut reconnu, pas d'étoile
+        CHECK (! p.presets.getCurrent().user && p.presets.getCurrent().factoryIndex == p.getMatchingPreset() && p.getMatchingPreset() >= 0,
+               "nouvelle instance : point de départ par défaut non reconnu");
+        CHECK (! p.presets.isModified(), "nouvelle instance marquée modifiée");
+        CHECK (p.presets.getUserPresets().isEmpty(), "dossier de test pas vide");
+
+        // Noms
+        CHECK (PresetLibrary::cleanName ("  a/b:c  ").isNotEmpty() && ! PresetLibrary::cleanName ("a/b:c").containsAnyOf ("/:"), "nom mal nettoyé");
+        CHECK (PresetLibrary::cleanName ("   ").isEmpty() && PresetLibrary::cleanName ("...").isEmpty(), "nom vide accepté");
+        CHECK (! p.presets.save ("   "), "un nom vide a été enregistré");
+        CHECK (PresetLibrary::cleanName (juce::String::repeatedString ("x", 200)).length() <= 48, "nom trop long");
+
+        // Enregistrer : fichier créé, preset en cours, pas d'étoile
+        setParam (p, P_A_ID, P_A_VALUE);
+        setParam (p, P_LEVEL_ID, -7.5f);
+        const float aBefore = p.apvts.getRawParameterValue (P_A_ID)->load();
+        CHECK (p.presets.save ("Darkpsy Crack"), "enregistrement impossible");
+        const auto file = dir.getChildFile ("Darkpsy Crack" + ext);
+        CHECK (file.existsAsFile(), "fichier du preset absent");
+        CHECK (p.presets.getCurrent().user && p.presets.getDisplayName() == "Darkpsy Crack", "preset en cours incorrect après enregistrement");
+        CHECK (! p.presets.isModified(), "marqué modifié juste après l'enregistrement");
+
+        // Modifier -> étoile ; recharger -> valeurs du fichier, plus d'étoile
+        setParam (p, P_A_ID, P_A_OTHER);
+        setParam (p, P_LEVEL_ID, 3.0f);
+        CHECK (p.presets.isModified(), "modification non détectée");
+        CHECK (p.presets.load (file), "rechargement impossible");
+        CHECK (std::abs (p.apvts.getRawParameterValue (P_A_ID)->load() - aBefore) < 1e-3f, "valeur non restaurée");
+        CHECK (std::abs (p.apvts.getRawParameterValue (P_LEVEL_ID)->load() + 7.5f) < 1e-3f, "LEVEL non restauré");
+        CHECK (! p.presets.isModified(), "marqué modifié après chargement");
+
+        // Tous les paramètres : enregistrer puis recharger donne exactement les mêmes valeurs
+        {
+            juce::Random r (7);
+            for (auto* prm : p.getParameters())
+                prm->setValueNotifyingHost (r.nextFloat());
+            std::vector<float> saved;
+            for (auto* prm : p.getParameters())
+                saved.push_back (prm->getValue());
+            CHECK (p.presets.save ("Random"), "enregistrement Random impossible");
+            for (auto* prm : p.getParameters())
+                prm->setValueNotifyingHost (prm->getDefaultValue());
+            CHECK (p.presets.load (dir.getChildFile ("Random" + ext)), "chargement Random impossible");
+            float worst = 0.0f;
+            for (int i = 0; i < p.getParameters().size(); ++i)
+                worst = juce::jmax (worst, std::abs (p.getParameters()[i]->getValue() - saved[(size_t) i]));
+            CHECK (worst < 1e-4f, "aller-retour imparfait (écart %g)", (double) worst);
+        }
+
+        // Remplacer un preset existant
+        setParam (p, P_A_ID, P_A_OTHER);
+        CHECK (p.presets.exists ("Random") && p.presets.save ("Random"), "remplacement impossible");
+        CHECK (p.presets.getUserPresets().size() == 2, "remplacer a créé un doublon (%d fichiers)", p.presets.getUserPresets().size());
+
+        // Ordre ‹ › : usine puis utilisateur (tri par nom), en boucle
+        {
+            const auto list = p.presets.getAllEntries();
+            CHECK ((int) list.size() == factoryCount + 2, "liste : %d entrées", (int) list.size());
+            CHECK (list[(size_t) factoryCount].name == "Darkpsy Crack" && list[(size_t) factoryCount + 1].name == "Random", "tri des presets utilisateur");
+
+            p.presets.loadFactory (0);
+            p.presets.step (-1);
+            CHECK (p.presets.getDisplayName() == "Random", "‹ depuis le premier ne boucle pas (%s)", p.presets.getDisplayName().toRawUTF8());
+            p.presets.step (+1);
+            CHECK (! p.presets.getCurrent().user && p.presets.getCurrent().factoryIndex == 0, "› depuis le dernier ne boucle pas");
+            for (int i = 0; i < factoryCount; ++i)
+                p.presets.step (+1);
+            CHECK (p.presets.getDisplayName() == "Darkpsy Crack", "› ne passe pas aux presets utilisateur");
+            CHECK (std::abs (p.apvts.getRawParameterValue (P_A_ID)->load() - aBefore) < 1e-3f, "› n'a pas chargé le preset");
+            p.presets.loadFactory (1);
+            CHECK (p.getMatchingPreset() == 1 && ! p.presets.isModified(), "point de départ via la bibliothèque");
+        }
+
+        // L'état du projet garde le preset en cours, et l'étoile
+        {
+            p.presets.load (file);
+            setParam (p, P_A_ID, P_A_OTHER);
+            juce::MemoryBlock state;
+            p.getStateInformation (state);
+
+            Proc q;
+            q.presets.setFolderOverride (dir);
+            q.setStateInformation (state.getData(), (int) state.getSize());
+            CHECK (q.presets.getCurrent().user && q.presets.getDisplayName() == "Darkpsy Crack", "nom du preset perdu avec le projet");
+            CHECK (q.presets.isModified(), "l'étoile est perdue avec le projet");
+
+            p.presets.load (file);
+            p.getStateInformation (state);
+            Proc r;
+            r.setStateInformation (state.getData(), (int) state.getSize());
+            CHECK (r.presets.getDisplayName() == "Darkpsy Crack" && ! r.presets.isModified(), "preset non modifié rechargé avec une étoile");
+
+            // Ancien projet (sans nom de preset) : le point de départ est reconnu
+            Proc old;
+            old.applyPreset (2);
+            auto tree = old.apvts.copyState();
+            tree.removeProperty ("presetName", nullptr);
+            tree.removeProperty ("presetFile", nullptr);
+            tree.removeProperty ("presetFactory", nullptr);
+            juce::MemoryBlock oldState;
+            old.copyXmlToBinary (*tree.createXml(), oldState);
+            Proc s;
+            s.setStateInformation (oldState.getData(), (int) oldState.getSize());
+            CHECK (! s.presets.getCurrent().user && s.presets.getCurrent().factoryIndex == 2, "ancien projet : point de départ non reconnu");
+        }
+
+        // Fichiers abîmés : refusés, réglages inchangés
+        {
+            const auto bad = dir.getChildFile ("Broken" + ext);
+            bad.replaceWithText ("<nope");
+            const auto other = dir.getChildFile ("Other" + ext);
+            other.replaceWithText ("<SomethingElse><PARAM id=\"level\" value=\"-20\"/></SomethingElse>");
+            setParam (p, P_LEVEL_ID, 1.0f);
+            CHECK (! p.presets.load (bad) && ! p.presets.load (other) && ! p.presets.load (dir.getChildFile ("missing" + ext)), "fichier invalide accepté");
+            CHECK (std::abs (p.apvts.getRawParameterValue (P_LEVEL_ID)->load() - 1.0f) < 1e-3f, "un fichier invalide a changé les réglages");
+
+            // Paramètre absent ou valeur folle : défaut / borné, sans plantage
+            const auto partial = dir.getChildFile ("Partial" + ext);
+            partial.replaceWithText ("<" + juce::String (PLUGIN_NAME) + "Preset version=\"1\"><PARAM id=\"level\" value=\"999\"/><PARAM id=\"" + juce::String (P_A_ID) + "\" value=\"nan\"/></" + juce::String (PLUGIN_NAME) + "Preset>");
+            CHECK (p.presets.load (partial), "preset partiel refusé");
+            CHECK (std::abs (p.apvts.getRawParameterValue (P_LEVEL_ID)->load() - 6.0f) < 1e-3f, "valeur hors plage non bornée");
+            bad.deleteFile();
+            other.deleteFile();
+            partial.deleteFile();
+        }
+
+        // Supprimer : le fichier part, le preset en cours est oublié
+        {
+            const auto random = dir.getChildFile ("Random" + ext);
+            p.presets.load (random);
+            CHECK (p.presets.remove (random) && ! random.existsAsFile(), "suppression impossible");
+            CHECK (! p.presets.getCurrent().user, "preset supprimé encore en cours");
+            CHECK (! p.presets.remove (random), "suppression d'un fichier absent acceptée");
+        }
+
+        // Interface : barre des presets
+        {
+            p.setRateAndBufferSizeDetails (sampleRate, blockSize);
+            p.prepareToPlay (sampleRate, blockSize);
+            p.presets.loadFactory (0);
+            std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorAndMakeActive());
+            auto& facade = dynamic_cast<EDITOR_CLASS*> (editor.get())->getFacade();
+            auto* next = dynamic_cast<juce::TextButton*> (facade.findChildWithID ("presetNext"));
+            auto* name = dynamic_cast<juce::TextButton*> (facade.findChildWithID ("presetName"));
+            auto* save = dynamic_cast<juce::TextButton*> (facade.findChildWithID ("presetSave"));
+            CHECK (next != nullptr && name != nullptr && save != nullptr && facade.findChildWithID ("presetPrev") != nullptr, "barre des presets incomplète");
+
+            if (next != nullptr && name != nullptr)
+            {
+                CHECK (name->getButtonText() == juce::String (Proc::getPresets()[0].name), "nom affiché : %s", name->getButtonText().toRawUTF8());
+                next->triggerClick();
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (150);
+                CHECK (name->getButtonText() == juce::String (Proc::getPresets()[1].name), "› dans l'interface : %s", name->getButtonText().toRawUTF8());
+                setParam (p, P_A_ID, P_A_OTHER);
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (150);
+                CHECK (name->getButtonText().endsWith (" *"), "étoile absente dans l'interface : %s", name->getButtonText().toRawUTF8());
+                CHECK (name->getRight() < 800 && name->getWidth() >= 150, "barre mal placée (%d, %d)", name->getX(), name->getWidth());
+            }
+
+            if (save != nullptr)
+            {
+                save->onClick();
+                juce::Component* panel = nullptr;
+                for (auto* c : facade.getChildren())
+                    if (dynamic_cast<SavePresetPanel*> (c) != nullptr)
+                        panel = c;
+                CHECK (panel != nullptr && panel->isVisible(), "panneau SAVE non affiché");
+                if (panel != nullptr)
+                {
+                    auto* field = dynamic_cast<juce::TextEditor*> (panel->getChildren()[0]);
+                    CHECK (field != nullptr, "champ du nom absent");
+                    if (field != nullptr)
+                    {
+                        field->setText ("From UI", true);
+                        field->onReturnKey();
+                        CHECK (! panel->isVisible() && dir.getChildFile ("From UI" + ext).existsAsFile(), "SAVE depuis l'interface");
+                        juce::MessageManager::getInstance()->runDispatchLoopUntil (150);
+                        CHECK (name == nullptr || name->getButtonText() == "From UI", "nom non mis à jour après SAVE");
+                    }
+                }
+            }
+
+            p.editorBeingDeleted (editor.get());
+            editor.reset();
+        }
+
+        dir.deleteRecursively();
     }
 
     std::printf ("Interface\n");

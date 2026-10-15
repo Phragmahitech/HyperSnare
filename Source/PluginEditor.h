@@ -38,6 +38,20 @@ public:
     void drawButtonText (juce::Graphics&, juce::TextButton&,
                          bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override;
 
+    // Menu des presets
+    juce::Font getPopupMenuFont() override;
+    void drawPopupMenuBackground (juce::Graphics&, int width, int height) override;
+    void drawPopupMenuItem (juce::Graphics&, const juce::Rectangle<int>& area, bool isSeparator, bool isActive,
+                            bool isHighlighted, bool isTicked, bool hasSubMenu, const juce::String& text,
+                            const juce::String& shortcutKeyText, const juce::Drawable* icon, const juce::Colour* textColour) override;
+    void drawPopupMenuSectionHeader (juce::Graphics&, const juce::Rectangle<int>& area, const juce::String& sectionName) override;
+    void getIdealPopupMenuItemSize (const juce::String& text, bool isSeparator, int standardMenuItemHeight,
+                                    int& idealWidth, int& idealHeight) override;
+
+    // Champ du nom
+    void fillTextEditorBackground (juce::Graphics&, int width, int height, juce::TextEditor&) override;
+    void drawTextEditorOutline (juce::Graphics&, int width, int height, juce::TextEditor&) override;
+
 private:
     juce::Typeface::Ptr michroma, plexRegular, plexMedium;
 };
@@ -74,6 +88,37 @@ private:
 };
 
 //==============================================================================
+/** Fenêtre « SAVE PRESET » dessinée dans la façade (pas de fenêtre séparée dans le DAW). */
+class SavePresetPanel final : public juce::Component
+{
+public:
+    SavePresetPanel (SnareLookAndFeel&, PresetLibrary&);
+
+    /** Ouvre le panneau, nom proposé = preset en cours. */
+    void open (const juce::String& suggestedName);
+    void close();
+
+    std::function<void()> onSaved;
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override   { close(); }
+
+private:
+    void updateSaveButton();
+    void save();
+
+    SnareLookAndFeel& lf;
+    PresetLibrary& library;
+    juce::TextEditor nameField;
+    juce::TextButton cancelButton { "CANCEL" }, saveButton { "SAVE" };
+    juce::String message;
+    juce::Rectangle<int> box;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SavePresetPanel)
+};
+
+//==============================================================================
 /** La façade à taille fixe (1000 x 720) ; l'éditeur la met à l'échelle. */
 class SnareFacade final : public juce::Component,
                          private juce::Timer
@@ -101,6 +146,8 @@ private:
     void setupSegment (juce::TextButton&, juce::Rectangle<int> bounds);
     void timerCallback() override;
     void refreshFromParameters();
+    void showPresetMenu();
+    void layoutPresetBar();
 
     juce::String valueText (const char* id) const;
     float normalised (const char* id) const;
@@ -114,6 +161,11 @@ private:
     juce::TextButton bodyButtons[3];
     juce::TextButton presetButtons[4];
     juce::TextButton hit { "HIT" };
+
+    // Barre des presets (en-tête)
+    juce::TextButton presetPrev, presetName, presetNext, presetSave { "SAVE" };
+    SavePresetPanel savePanel;
+    juce::String shownPresetName;
 
     std::vector<std::unique_ptr<APVTS::SliderAttachment>> attachments;
 

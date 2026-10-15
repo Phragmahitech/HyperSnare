@@ -114,12 +114,39 @@ int main (int argc, char** argv)
         p.setRateAndBufferSizeDetails (sampleRate, 512);
         p.prepareToPlay (sampleRate, 512);
         std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorAndMakeActive());
-        auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
-        juce::PNGImageFormat png;
-        auto file = dir.getChildFile ("interface.png");
-        file.deleteFile();
-        if (auto stream = file.createOutputStream())
-            png.writeImageToStream (image, *stream);
+        auto snapshot = [&] (const char* name)
+        {
+            auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            auto file = dir.getChildFile (name);
+            file.deleteFile();
+            if (auto stream = file.createOutputStream())
+                png.writeImageToStream (image, *stream);
+        };
+
+        snapshot ("interface.png");
+
+        // Barre des presets : un preset utilisateur modifié, puis le panneau SAVE
+        const auto presetDir = dir.getChildFile ("presets");
+        presetDir.deleteRecursively();
+        p.presets.setFolderOverride (presetDir);
+        apply (p, { { P::bodyId, 2.0f }, { P::characterId, 70.0f } });
+        p.presets.save ("Darkpsy Crack 190");
+        apply (p, { { P::tuneId, 260.0f } });
+
+        if (auto* facade = dynamic_cast<HyperSnareAudioProcessorEditor*> (editor.get()))
+        {
+            auto& f = facade->getFacade();
+            for (int i = 0; i < 3; ++i)
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (40);   // laisse le minuteur rafraîchir
+            snapshot ("interface-preset.png");
+
+            if (auto* save = dynamic_cast<juce::TextButton*> (f.findChildWithID ("presetSave")))
+                save->onClick();
+            snapshot ("interface-save.png");
+        }
+
+        presetDir.deleteRecursively();
         p.editorBeingDeleted (editor.get());
     }
 

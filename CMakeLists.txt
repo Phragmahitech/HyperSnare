@@ -17,7 +17,7 @@ endif()
 # Windows : runtime C++ lié en statique -> aucun "Visual C++ Redistributable" à installer
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project(HyperSnare VERSION 0.1.1 LANGUAGES C CXX)
+project(HyperSnare VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -147,7 +147,7 @@ if(HYPERSNARE_BUILD_TESTS)
         Tools/Render.cpp
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp)
-    target_compile_definitions(HyperSnareRender PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
+    target_compile_definitions(HyperSnareRender PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1
         HYPERSNARE_VERSION="${PROJECT_VERSION}")
     target_link_libraries(HyperSnareRender PRIVATE
         juce::juce_audio_processors

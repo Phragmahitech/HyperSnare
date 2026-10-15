@@ -134,14 +134,241 @@ void SnareLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& bu
     g.drawRect (area, 1.0f);
 }
 
-void SnareLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& button, bool, bool down)
+void SnareLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& button, bool highlighted, bool down)
 {
-    const bool hit = button.getComponentID() == "hit";
+    const auto id = button.getComponentID();
+    const auto area = button.getLocalBounds().toFloat();
+
+    // Flèches ‹ › de la barre des presets
+    if (id == "presetPrev" || id == "presetNext")
+    {
+        const float dir = id == "presetPrev" ? -1.0f : 1.0f;
+        const auto c = area.getCentre();
+        juce::Path chevron;
+        chevron.startNewSubPath (c.x - dir * 2.5f, c.y - 5.0f);
+        chevron.lineTo (c.x + dir * 2.5f, c.y);
+        chevron.lineTo (c.x - dir * 2.5f, c.y + 5.0f);
+        g.setColour (highlighted || down ? juce::Colours::white : ink());
+        g.strokePath (chevron, juce::PathStrokeType (1.2f));
+        return;
+    }
+
+    // Nom du preset : texte à gauche, petit triangle à droite
+    if (id == "presetName")
+    {
+        auto textArea = area.reduced (12.0f, 0.0f).withTrimmedRight (14.0f);
+        auto text = button.getButtonText();
+        const auto font = mono (11.0f, 0.12f);
+        g.setFont (font);
+
+        // L'étoile « modifié » reste visible même quand le nom est coupé
+        if (text.endsWith (" *"))
+        {
+            text = text.dropLastCharacters (2);
+            g.setColour (white());
+            g.drawText ("*", textArea.removeFromRight (12.0f), juce::Justification::centredRight, false);
+            textArea.removeFromRight (4.0f);
+        }
+
+        g.setColour (ink());
+        g.drawText (text, textArea, juce::Justification::centredLeft, true);
+
+        juce::Path caret;
+        const float x = area.getRight() - 16.0f, y = area.getCentreY() - 1.5f;
+        caret.addTriangle (x, y, x + 7.0f, y, x + 3.5f, y + 4.0f);
+        g.setColour (highlighted ? juce::Colours::white : label());
+        g.fillPath (caret);
+        return;
+    }
+
+    const bool hit = id == "hit";
     const bool dark = hit ? ! down : button.getToggleState();
 
     g.setColour (dark ? ground() : ink());
     g.setFont (mono (10.0f, 0.2f));
     g.drawText (button.getButtonText(), button.getLocalBounds(), juce::Justification::centred, false);
+}
+
+juce::Font SnareLookAndFeel::getPopupMenuFont()
+{
+    return mono (12.0f, 0.06f);
+}
+
+void SnareLookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int w, int h)
+{
+    g.fillAll (juce::Colour (0xff0b0b0b));
+    g.setColour (outline());
+    g.drawRect (0, 0, w, h, 1);
+}
+
+void SnareLookAndFeel::drawPopupMenuItem (juce::Graphics& g, const juce::Rectangle<int>& area, bool isSeparator, bool isActive,
+                                         bool isHighlighted, bool isTicked, bool, const juce::String& text,
+                                         const juce::String&, const juce::Drawable*, const juce::Colour*)
+{
+    if (isSeparator)
+    {
+        g.setColour (line().brighter (0.3f));
+        g.fillRect (area.reduced (10, 0).withHeight (1).withY (area.getCentreY()));
+        return;
+    }
+
+    auto r = area.reduced (1, 0);
+    if (isHighlighted && isActive)
+    {
+        g.setColour (white());
+        g.fillRect (r);
+    }
+
+    const auto textColour = ! isActive ? juce::Colour (0xff4a4a4a) : isHighlighted ? ground() : ink();
+
+    if (isTicked)
+    {
+        g.setColour (textColour);
+        g.fillRect (juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ (float) r.getX() + 13.0f, (float) r.getCentreY() }));
+    }
+
+    g.setColour (textColour);
+    g.setFont (getPopupMenuFont());
+    g.drawText (text, r.withTrimmedLeft (26).withTrimmedRight (12), juce::Justification::centredLeft, true);
+}
+
+void SnareLookAndFeel::drawPopupMenuSectionHeader (juce::Graphics& g, const juce::Rectangle<int>& area, const juce::String& sectionName)
+{
+    g.setColour (dim());
+    g.setFont (mono (9.0f, 0.2f));
+    g.drawText (sectionName, area.withTrimmedLeft (12).withTrimmedTop (4), juce::Justification::centredLeft, false);
+}
+
+void SnareLookAndFeel::getIdealPopupMenuItemSize (const juce::String& text, bool isSeparator, int, int& idealWidth, int& idealHeight)
+{
+    if (isSeparator)
+    {
+        idealWidth = 60;
+        idealHeight = 9;
+        return;
+    }
+
+    idealHeight = 24;
+    idealWidth = juce::jmax (180, (int) std::ceil (juce::GlyphArrangement::getStringWidth (getPopupMenuFont(), text)) + 46);
+}
+
+void SnareLookAndFeel::fillTextEditorBackground (juce::Graphics& g, int w, int h, juce::TextEditor&)
+{
+    g.setColour (juce::Colour (0xff0d0d0d));
+    g.fillRect (0, 0, w, h);
+}
+
+void SnareLookAndFeel::drawTextEditorOutline (juce::Graphics& g, int w, int h, juce::TextEditor& editor)
+{
+    g.setColour (editor.hasKeyboardFocus (true) ? white() : outline());
+    g.drawRect (0, 0, w, h, 1);
+}
+
+//==============================================================================
+SavePresetPanel::SavePresetPanel (SnareLookAndFeel& l, PresetLibrary& lib)
+    : lf (l), library (lib)
+{
+    setInterceptsMouseClicks (true, true);
+
+    nameField.setFont (lf.mono (14.0f, 0.06f));
+    nameField.setColour (juce::TextEditor::textColourId, SnareLookAndFeel::ink());
+    nameField.setColour (juce::TextEditor::highlightColourId, juce::Colour (0xff4a4a4a));
+    nameField.setColour (juce::TextEditor::highlightedTextColourId, juce::Colours::white);
+    nameField.setColour (juce::CaretComponent::caretColourId, juce::Colours::white);
+    nameField.setIndents (12, 0);
+    nameField.setJustification (juce::Justification::centredLeft);
+    nameField.setInputRestrictions (48);
+    nameField.setSelectAllWhenFocused (true);
+    nameField.setTitle ("Preset name");
+    nameField.onTextChange = [this] { updateSaveButton(); };
+    nameField.onReturnKey = [this] { save(); };
+    nameField.onEscapeKey = [this] { close(); };
+    addAndMakeVisible (nameField);
+
+    for (auto* b : { &cancelButton, &saveButton })
+    {
+        b->setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        addAndMakeVisible (*b);
+    }
+
+    saveButton.setComponentID ("hit");   // bouton plein, comme HIT
+    cancelButton.onClick = [this] { close(); };
+    saveButton.onClick = [this] { save(); };
+
+    setVisible (false);
+}
+
+void SavePresetPanel::open (const juce::String& suggestedName)
+{
+    message = {};
+    nameField.setText (suggestedName, juce::dontSendNotification);
+    updateSaveButton();
+    setVisible (true);
+    toFront (false);
+
+    if (nameField.isShowing())
+        nameField.grabKeyboardFocus();
+    nameField.selectAll();
+}
+
+void SavePresetPanel::close()
+{
+    setVisible (false);
+    giveAwayKeyboardFocus();   // rend le clavier au DAW (barre d'espace, etc.)
+}
+
+void SavePresetPanel::updateSaveButton()
+{
+    const auto name = PresetLibrary::cleanName (nameField.getText());
+    saveButton.setEnabled (name.isNotEmpty());
+    saveButton.setButtonText (library.exists (name) ? "REPLACE" : "SAVE");
+    message = {};
+    repaint();
+}
+
+void SavePresetPanel::save()
+{
+    const auto name = PresetLibrary::cleanName (nameField.getText());
+    if (name.isEmpty())
+        return;
+
+    if (! library.save (name))
+    {
+        message = "COULD NOT WRITE THE PRESET FILE";
+        repaint();
+        return;
+    }
+
+    close();
+    if (onSaved)
+        onSaved();
+}
+
+void SavePresetPanel::resized()
+{
+    box = juce::Rectangle<int> (440, 224).withCentre (getLocalBounds().getCentre());
+    nameField.setBounds (box.getX() + 28, box.getY() + 66, box.getWidth() - 56, 40);
+    const int buttonsY = box.getBottom() - 28 - 40;
+    saveButton.setBounds (box.getRight() - 28 - 110, buttonsY, 110, 40);
+    cancelButton.setBounds (saveButton.getX() - 8 - 110, buttonsY, 110, 40);
+}
+
+void SavePresetPanel::paint (juce::Graphics& g)
+{
+    g.fillAll (juce::Colours::black.withAlpha (0.78f));
+
+    g.setColour (SnareLookAndFeel::ground());
+    g.fillRect (box);
+    g.setColour (SnareLookAndFeel::outline());
+    g.drawRect (box, 1);
+
+    drawLabel (g, "SAVE PRESET", lf.title (12.0f, 0.34f), juce::Colour (0xfff4f4f4),
+               box.toFloat().reduced (28.0f, 0.0f).withY ((float) box.getY() + 26.0f).withHeight (18.0f), juce::Justification::centredLeft);
+
+    const auto hint = juce::String (juce::CharPointer_UTF8 ("ENTER = SAVE \xc2\xb7 ESC = CANCEL"));
+    drawLabel (g, message.isNotEmpty() ? message : hint, lf.mono (9.0f, 0.14f),
+               message.isNotEmpty() ? juce::Colour (0xffd0d0d0) : SnareLookAndFeel::faint(),
+               box.toFloat().reduced (28.0f, 0.0f).withY ((float) box.getY() + 114.0f).withHeight (14.0f), juce::Justification::centredLeft);
 }
 
 //==============================================================================
@@ -270,7 +497,7 @@ void SnareDisplay::paint (juce::Graphics& g)
 
 //==============================================================================
 SnareFacade::SnareFacade (HyperSnareAudioProcessor& p)
-    : audioProcessor (p)
+    : audioProcessor (p), savePanel (lookAndFeel, p.presets)
 {
     setLookAndFeel (&lookAndFeel);
     setSize (width, height);
@@ -325,7 +552,7 @@ SnareFacade::SnareFacade (HyperSnareAudioProcessor& p)
     {
         presetButtons[i].setButtonText (HyperSnareAudioProcessor::getPresets()[(size_t) i].name);
         setupSegment (presetButtons[i], juce::Rectangle<float> (rightX + i * (presetWidth + 6.0f), 568.0f, presetWidth, 44.0f).toNearestInt());
-        presetButtons[i].onClick = [this, i] { audioProcessor.applyPreset (i); };
+        presetButtons[i].onClick = [this, i] { audioProcessor.presets.loadFactory (i); };
     }
 
     // Écoute
@@ -334,6 +561,33 @@ SnareFacade::SnareFacade (HyperSnareAudioProcessor& p)
     hit.setBounds (832, footerKnobY, 136, 44);
     hit.onClick = [this] { audioProcessor.requestPreview(); };
     addAndMakeVisible (hit);
+
+    // Presets : ‹ NOM ▾ › SAVE
+    presetPrev.setComponentID ("presetPrev");
+    presetName.setComponentID ("presetName");
+    presetNext.setComponentID ("presetNext");
+    presetSave.setComponentID ("presetSave");
+    presetPrev.setTitle ("Previous preset");
+    presetNext.setTitle ("Next preset");
+    presetName.setTitle ("Presets");
+
+    for (auto* b : { &presetPrev, &presetName, &presetNext, &presetSave })
+        setupSegment (*b, {});
+
+    layoutPresetBar();
+
+    presetPrev.onClick = [this] { audioProcessor.presets.step (-1); };
+    presetNext.onClick = [this] { audioProcessor.presets.step (+1); };
+    presetName.onClick = [this] { showPresetMenu(); };
+    presetSave.onClick = [this]
+    {
+        const auto& current = audioProcessor.presets.getCurrent();
+        savePanel.open (current.user ? current.name : juce::String());
+    };
+
+    savePanel.setBounds (getLocalBounds());
+    savePanel.onSaved = [this] { refreshFromParameters(); repaint(); };
+    addChildComponent (savePanel);
 
     lastHitCount = audioProcessor.getHitCount();
     refreshFromParameters();
@@ -345,6 +599,101 @@ SnareFacade::~SnareFacade()
     stopTimer();
     attachments.clear();
     setLookAndFeel (nullptr);
+}
+
+void SnareFacade::layoutPresetBar()
+{
+    // Entre « SNARE SYNTHESIS » et « BY PHRAGMA »
+    const auto wordmark = lookAndFeel.title (20.0f, 0.36f);
+    const auto label10 = lookAndFeel.mono (10.0f, 0.14f);
+    const float left = 34.0f + textWidth (wordmark, "HYPERSNARE") + 22.0f + textWidth (label10, "SNARE SYNTHESIS") + 20.0f;
+    const auto value11 = lookAndFeel.mono (11.0f, 0.04f);
+    const float byRight = 966.0f - textWidth (value11, "v" + juce::String (HYPERSNARE_VERSION)) - 16.0f;
+    const float right = byRight - textWidth (label10, "BY PHRAGMA") - 20.0f;
+
+    const int arrow = 28, save = 56, gap = 4, h = 30, y = 17;
+    const int nameWidth = juce::jlimit (110, 230, (int) (right - left) - 2 * arrow - save - 3 * gap - 6);
+    const int total = 2 * arrow + nameWidth + save + 3 * gap + 6;
+    int x = juce::roundToInt ((left + right - (float) total) * 0.5f);
+
+    presetPrev.setBounds (x, y, arrow, h);           x += arrow + gap;
+    presetName.setBounds (x, y, nameWidth, h);       x += nameWidth + gap;
+    presetNext.setBounds (x, y, arrow, h);           x += arrow + gap + 6;
+    presetSave.setBounds (x, y, save, h);
+}
+
+void SnareFacade::showPresetMenu()
+{
+    auto& library = audioProcessor.presets;
+    const auto list = library.getAllEntries();
+    const int currentIndex = library.indexOfCurrent (list);
+    const auto current = library.getCurrent();
+
+    enum { saveAsId = 100001, deleteId, folderId, emptyId };
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("FACTORY");
+    bool userSection = false;
+
+    for (size_t i = 0; i < list.size(); ++i)
+    {
+        if (list[i].user && ! userSection)
+        {
+            menu.addSeparator();
+            menu.addSectionHeader ("USER");
+            userSection = true;
+        }
+
+        menu.addItem ((int) i + 1, list[i].name, true, (int) i == currentIndex);
+    }
+
+    if (! userSection)
+    {
+        menu.addSeparator();
+        menu.addSectionHeader ("USER");
+        menu.addItem (emptyId, "NO SAVED PRESET YET", false);
+    }
+
+    menu.addSeparator();
+    menu.addItem (saveAsId, juce::String (juce::CharPointer_UTF8 ("SAVE AS\xe2\x80\xa6")));
+    if (current.user && current.file.existsAsFile())
+        menu.addItem (deleteId, "DELETE " + current.name.quoted());
+    menu.addItem (folderId, "SHOW PRESETS FOLDER");
+
+    juce::Component::SafePointer<SnareFacade> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&presetName)
+                                                  .withMinimumWidth (presetName.getWidth())
+                                                  .withStandardItemHeight (24),
+                        [safe, list] (int result)
+                        {
+                            if (safe == nullptr || result == 0)
+                                return;
+
+                            auto& lib = safe->audioProcessor.presets;
+
+                            if (result == saveAsId)
+                            {
+                                const auto& cur = lib.getCurrent();
+                                safe->savePanel.open (cur.user ? cur.name : juce::String());
+                            }
+                            else if (result == deleteId)
+                            {
+                                lib.remove (lib.getCurrent().file);
+                            }
+                            else if (result == folderId)
+                            {
+                                const auto dir = lib.folder();
+                                dir.createDirectory();
+                                dir.startAsProcess();
+                            }
+                            else if (juce::isPositiveAndBelow (result - 1, (int) list.size()))
+                            {
+                                lib.loadEntry (list[(size_t) (result - 1)]);
+                            }
+
+                            safe->refreshFromParameters();
+                            safe->repaint();
+                        });
 }
 
 void SnareFacade::setupKnob (Knob& knob, const char* id, const char* name, juce::Rectangle<int> bounds)
@@ -412,6 +761,10 @@ void SnareFacade::refreshFromParameters()
     for (int i = 0; i < 3; ++i)
         bodyButtons[i].setToggleState (params.body == i, juce::dontSendNotification);
 
+    const auto& library = audioProcessor.presets;
+    shownPresetName = library.getDisplayName() + (library.isModified() ? " *" : "");
+    presetName.setButtonText (shownPresetName);
+
     const int preset = audioProcessor.getMatchingPreset();
     for (int i = 0; i < 4; ++i)
         presetButtons[i].setToggleState (preset == i, juce::dontSendNotification);
@@ -466,6 +819,11 @@ void SnareFacade::timerCallback()
         }
     }
 
+    // Nom du preset (change aussi quand on enregistre, sans toucher aux réglages)
+    const auto& library = audioProcessor.presets;
+    if (library.getDisplayName() + (library.isModified() ? " *" : "") != shownPresetName)
+        changed = true;
+
     if (changed)
     {
         refreshFromParameters();
@@ -489,8 +847,10 @@ void SnareFacade::paint (juce::Graphics& g)
     drawLabel (g, "HYPERSNARE", wordmark, juce::Colour (0xfff4f4f4), { 34.0f, 18.0f, 400.0f, 28.0f }, juce::Justification::centredLeft);
     const float afterWordmark = 34.0f + textWidth (wordmark, "HYPERSNARE") + 22.0f;
     drawLabel (g, "SNARE SYNTHESIS", label10, LF::dim(), { afterWordmark, 22.0f, 300.0f, 22.0f }, juce::Justification::centredLeft);
-    drawLabel (g, "v" + juce::String (HYPERSNARE_VERSION), value11, LF::label(), { 866.0f, 22.0f, 100.0f, 22.0f }, juce::Justification::centredRight);
-    drawLabel (g, "BY PHRAGMA", label10, LF::label(), { 700.0f, 22.0f, 130.0f, 22.0f }, juce::Justification::centredRight);
+    const auto versionText = "v" + juce::String (HYPERSNARE_VERSION);
+    drawLabel (g, versionText, value11, LF::label(), { 866.0f, 22.0f, 100.0f, 22.0f }, juce::Justification::centredRight);
+    const float byRight = 966.0f - textWidth (value11, versionText) - 16.0f;
+    drawLabel (g, "BY PHRAGMA", label10, LF::label(), { byRight - 130.0f, 22.0f, 130.0f, 22.0f }, juce::Justification::centredRight);
 
     g.setColour (LF::line());
     g.fillRect (0, headerHeight - 1, width, 1);

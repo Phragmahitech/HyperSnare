@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "SnareEngine.h"
+#include "PresetLibrary.h"
 
 /**
     HyperSnare : instrument VST3 de caisse claire en synthèse pure.
@@ -77,6 +78,9 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState apvts;
+
+    /** Points de départ + presets de l'utilisateur (fichiers .hspreset). */
+    PresetLibrary presets;
 
     //==========================================================================
     // Pour l'interface

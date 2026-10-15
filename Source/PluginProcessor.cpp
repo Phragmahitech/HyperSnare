@@ -204,7 +204,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout HyperSnareAudioProcessor::cr
 //==============================================================================
 HyperSnareAudioProcessor::HyperSnareAudioProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "HyperSnare", createParameterLayout())
+      apvts (*this, nullptr, "HyperSnare", createParameterLayout()),
+      presets (apvts, "HyperSnare", ".hspreset",
+               { [] { return (int) getPresets().size(); },
+                 [] (int i) { return juce::String (getPresets()[(size_t) i].name); },
+                 [this] (int i) { applyPreset (i); },
+                 [this] { return getMatchingPreset(); } })
 {
     bodyParam       = apvts.getRawParameterValue (bodyId);
     balanceParam    = apvts.getRawParameterValue (balanceId);
@@ -223,6 +228,7 @@ HyperSnareAudioProcessor::HyperSnareAudioProcessor()
     levelParam      = apvts.getRawParameterValue (levelId);
 
     engine.setParams (readParams());
+    presets.restoreFromState();   // réglages par défaut = HITECH
 }
 
 hypersnare::SnareParams HyperSnareAudioProcessor::readParams() const
@@ -354,7 +360,10 @@ void HyperSnareAudioProcessor::setStateInformation (const void* data, int sizeIn
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
+        {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            presets.restoreFromState();
+        }
 }
 
 juce::AudioProcessorEditor* HyperSnareAudioProcessor::createEditor()
