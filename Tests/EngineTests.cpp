@@ -292,6 +292,25 @@ int main()
         CHECK (std::abs (rmsOf (twice.left, 0, 2400) - rmsOf (twice.left, 4800, 7200)) > 1e-4, "VARIATION sans effet");
     }
 
+
+    std::printf ("VARIATION 0 : toutes les frappes identiques, au bit près\n");
+    for (int body = 0; body < 3; ++body)
+    {
+        SnareParams p;
+        p.body = body; p.variation = 0.0f; p.character = 0.8f; p.balance = 0.5f; p.width = 0.6f; p.crush = 0.3f; p.drive = 0.5f;
+        auto r = render (p, { { 0, 0.8f }, { 3000, 0.8f }, { 6000, 0.8f } }, 9000);
+        const size_t len = (size_t) (2.5 * sr);
+        double maxDiff = 0;
+        for (int k = 1; k < 3; ++k)
+            for (size_t i = 0; i < len; ++i)
+            {
+                const size_t j = (size_t) (k * 3.0 * sr) + i;
+                maxDiff = std::max (maxDiff, (double) std::abs (r.left[j] - r.left[i]));
+                maxDiff = std::max (maxDiff, (double) std::abs (r.right[j] - r.right[i]));
+            }
+        CHECK (maxDiff == 0.0, "corps %d : frappes différentes à VARIATION 0 (écart %.2e)", body, maxDiff);
+    }
+
     std::printf ("Fréquences d'échantillonnage et réglages au hasard\n");
     {
         Noise rng;

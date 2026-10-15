@@ -144,7 +144,7 @@ public:
         auto die = [&dice] { return dice.next(); };
 
         const float c = clamp01 (p.character);
-        const float vary = clamp01 (p.variation + 0.25f * c);
+        const float vary = clamp01 (p.variation);   // VARIATION seul : à 0, toutes les frappes sont identiques
         velocity = clamp01 (velocity);
 
         // Réglages de la frappe, avec ses petites différences
@@ -524,7 +524,8 @@ public:
         }
 
         ++hitCount;
-        target->start (params, std::clamp (velocity, 0.0f, 1.0f), sampleRate, hitCount * 0x9E3779B9u + seedBase);
+        holdPhase = 0;   // CRUSH repart du début de la frappe
+        target->start (params, std::clamp (velocity, 0.0f, 1.0f), sampleRate, hitSeed());
     }
 
     void process (float* left, float* right, int n) noexcept
@@ -606,6 +607,13 @@ public:
     }
 
     uint32_t getHitCount() const noexcept      { return hitCount; }
+
+    /** Graine de la frappe : à VARIATION 0, toujours la même (bruit et phases identiques d'un coup à l'autre) ;
+        au-dessus, une nouvelle graine par frappe. */
+    uint32_t hitSeed() const noexcept
+    {
+        return params.variation > 0.0005f ? hitCount * 0x9E3779B9u + seedBase : seedBase;
+    }
     void setSeedBase (uint32_t s) noexcept     { seedBase = s; }
 
     static float softClip (float x) noexcept
